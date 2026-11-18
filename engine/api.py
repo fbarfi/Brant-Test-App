@@ -322,7 +322,8 @@ def _run(spec):
                     ". The binary logits for the splits next to them, and the Brant test, rest on little information.")
 
     # ordered logit: slopes
-    names = list(mod.exog_names)
+    # OrderedModel appends the threshold names to exog_names; keep only the slope columns
+    names = list(mod.exog_names)[:int(np.asarray(mod.exog).shape[1])]
     K = len(names)
     params = np.asarray(res.params, float)
     se = np.asarray(res.bse, float)
