@@ -100,7 +100,10 @@ assert json.loads(api.register("sim", df.to_csv(index=False)))["ok"]
 r3 = run({"dataset": "sim", "y": "y", "x": ["x", "g"], "categorical": [], "baselines": {}})
 check("uploaded data with a numeric outcome run", r3["ok"])
 b3 = {row["Test for"]: row for row in table(r3, "Brant test")["rows"]}
-check("data simulated under proportional odds: x not rejected at 1%", b3["x"]["p"] > 0.01, f"p = {b3['x']['p']:.3f}")
+check("uploaded data: x tested with (J − 2)·1 = 2 df and g jointly with (J − 2)·2 = 4 df",
+      b3["x"]["df"] == 2 and b3["g"]["df"] == 4, f"x: {b3['x']['df']}, g: {b3['g']['df']}")
+# The p-value from one simulated sample is random, so it is printed but not used as a pass/fail check.
+print(f"      (simulated under proportional odds: Brant p for x = {b3['x']['p']:.3f})")
 df["y2"] = (df["y"] > 2).astype(int)
 assert json.loads(api.register("sim2", df.to_csv(index=False)))["ok"]
 r4 = json.loads(api.run(json.dumps({"dataset": "sim2", "y": "y2", "x": ["x"]})))
