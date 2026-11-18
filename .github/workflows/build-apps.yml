@@ -1,0 +1,198 @@
+# Builds the Brant Test desktop apps:
+#   macOS (Apple silicon and Intel): a .dmg containing "Brant Test.app"
+#   Windows: "Brant Test Setup.exe"
+# Runs when a release is published with a new tag such as v1.0.0, and on demand
+# (Actions tab -> Build desktop apps -> Run workflow, where "Which apps to build" picks all apps or one).
+# Commits to main do not start a build. A release build always builds all three apps.
+# A release build attaches each file directly to that release on the Releases page (release files do not
+# count toward the Actions storage limit). Builds without a tag keep their files as artifacts for one day.
+# Signing is optional: with the secrets MAC_CERT_P12_BASE64, MAC_CERT_PASSWORD, MAC_SIGN_IDENTITY (and APPLE_ID,
+# APPLE_TEAM_ID, APPLE_APP_PASSWORD for notarization) or WIN_CERT_PFX_BASE64, WIN_CERT_PASSWORD the apps are signed.
+
+name: Build desktop apps
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Which apps to build"
+        type: choice
+        default: all
+        options: [all, windows, macos-apple-silicon, macos-intel]
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms != 'windows'
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.platforms == 'macos-intel' && '[{"runner":"macos-15-intel","arch":"intel"}]' || inputs.platforms == 'macos-apple-silicon' && '[{"runner":"macos-15","arch":"apple-silicon"}]' || '[{"runner":"macos-15","arch":"apple-silicon"},{"runner":"macos-15-intel","arch":"intel"}]') }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+      MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+      MAC_SIGN_IDENTITY: ${{ secrets.MAC_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller "pywebview>=5.0"
+      - name: Check the computations (tests/test_app.py)
+        timeout-minutes: 20
+        run: python tests/test_app.py
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "BTA_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV; else echo "BTA_VERSION=1.0.0" >> $GITHUB_ENV; fi
+      - name: Build the app
+        run: pyinstaller desktop/app.spec --noconfirm
+      - name: Smoke test the built app
+        timeout-minutes: 10
+        run: |
+          BTA_CHECK_WINDOW=1 "dist/Brant Test.app/Contents/MacOS/Brant Test"   # pywebview and its window backend are bundled
+          BTA_NO_WINDOW=1 "dist/Brant Test.app/Contents/MacOS/Brant Test" &
+          for i in $(seq 1 60); do curl -s -m 10 -X POST localhost:8766/api/load -d '{"name":"political_information"}' | grep -q '"ok": true' && break; sleep 2; done
+          curl -s -m 300 -X POST localhost:8766/api/run -d '{"spec":{"dataset":"political_information","y":"info_rating","x":["collegeDegree","female","age","homeOwn","govt","length"]}}' -o /tmp/run.json
+          head -c 300 /tmp/run.json; echo
+          grep -q '"ok": true' /tmp/run.json
+          grep -q 'pybrant' /tmp/run.json        # the Brant test came from the bundled pybrant
+          grep -q 'statsmodels' /tmp/run.json    # the ordered logit came from the bundled statsmodels
+          pkill -f "Brant Test" || true
+      - name: Sign (only if signing secrets are set)
+        if: env.MAC_CERT_P12_BASE64 != ''
+        run: |
+          echo "$MAC_CERT_P12_BASE64" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          codesign --deep --force --timestamp --options runtime \
+            --entitlements desktop/entitlements.plist --sign "$MAC_SIGN_IDENTITY" "dist/Brant Test.app"
+      - name: Make the disk image
+        run: |
+          mkdir -p dmg && cp -R "dist/Brant Test.app" dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "Brant Test" -srcfolder dmg -ov -format UDZO \
+            "dist/Brant-Test-macOS-${{ matrix.arch }}.dmg"
+      - name: Notarize (only if Apple ID secrets are set)
+        if: env.MAC_CERT_P12_BASE64 != '' && env.APPLE_ID != ''
+        run: |
+          xcrun notarytool submit "dist/Brant-Test-macOS-${{ matrix.arch }}.dmg" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "dist/Brant-Test-macOS-${{ matrix.arch }}.dmg"
+      - name: Attach the disk image to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Brant-Test-macOS-${{ matrix.arch }}.dmg
+          fail_on_unmatched_files: true
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        with:
+          name: Brant-Test-macOS-${{ matrix.arch }}
+          path: dist/Brant-Test-macOS-${{ matrix.arch }}.dmg
+          retention-days: 1
+
+  windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'windows'
+    timeout-minutes: 90
+    runs-on: windows-latest
+    env:
+      WIN_CERT_PFX_BASE64: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+      WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller "pywebview>=5.0"
+      - name: Check the computations (tests/test_app.py)
+        timeout-minutes: 20
+        run: python tests/test_app.py
+      - name: Version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "BTA_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV; else echo "BTA_VERSION=1.0.0" >> $GITHUB_ENV; fi
+      - name: Build the app
+        run: pyinstaller desktop/app.spec --noconfirm
+      - name: Smoke test the built app
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $env:BTA_NO_WINDOW = "1"
+          $p = Start-Process -FilePath "dist\Brant Test\Brant Test.exe" -PassThru `
+                 -RedirectStandardOutput app_out.txt -RedirectStandardError app_err.txt
+          function Show-AppLog { Write-Host "---- app output ----"; Get-Content app_out.txt -ErrorAction SilentlyContinue; Write-Host "---- app errors ----"; Get-Content app_err.txt -ErrorAction SilentlyContinue }
+          # the first start of an unsigned app on Windows can be slow (virus scan of every file): wait up to 5 minutes
+          $ok = $false
+          for ($i = 0; $i -lt 150; $i++) {
+            if ($p.HasExited) { Show-AppLog; throw "The app quit during start-up (exit code $($p.ExitCode))." }
+            try {
+              $r = Invoke-RestMethod -Method Post -Uri http://localhost:8766/api/load -Body '{"name":"political_information"}' -TimeoutSec 10
+              if ($r.ok) { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) { Show-AppLog; throw "The app did not start within 5 minutes." }
+          Write-Host "App started after about $(2 * $i) seconds."
+          try {
+            $res = Invoke-WebRequest -Method Post -Uri http://localhost:8766/api/run -TimeoutSec 300 -UseBasicParsing `
+                     -Body '{"spec":{"dataset":"political_information","y":"info_rating","x":["collegeDegree","female","age","homeOwn","govt","length"]}}'
+            $txt = $res.Content
+          } catch { $txt = "request failed: $($_.Exception.Message)" }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not (($txt -match '"ok": ?true') -and ($txt -match 'pybrant') -and ($txt -match 'statsmodels'))) {
+            Write-Host "reply: $($txt.Substring(0, [Math]::Min(2000, $txt.Length)))"; Show-AppLog; throw "Smoke test failed."
+          }
+          Write-Host "Brant test run in the built app: ok"
+      - name: Sign the program (only if signing secrets are set)
+        if: env.WIN_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WIN_CERT_PFX_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $signtool.FullName sign /f cert.pfx /p $env:WIN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Brant Test\Brant Test.exe"
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:BTA_VERSION" desktop\installer.iss
+      - name: Sign the installer (only if signing secrets are set)
+        if: env.WIN_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: |
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $signtool.FullName sign /f cert.pfx /p $env:WIN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "dist\Brant Test Setup.exe"
+      - name: Attach the installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Brant Test Setup.exe
+          fail_on_unmatched_files: true
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        with:
+          name: Brant-Test-Windows
+          path: dist/Brant Test Setup.exe
+          retention-days: 1

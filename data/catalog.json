@@ -1,0 +1,56 @@
+[
+ {
+  "id": "political_information",
+  "title": "ANES 2000: interviewer rating of political information",
+  "kind": "real",
+  "weeks": [
+   6
+  ],
+  "source": "American National Election Study 2000, via pscl::politicalInformation; Jackman (2009).",
+  "description": "1,807 respondents. Interviewer rating of the respondent's political information in five ordered categories, with respondent characteristics.",
+  "order": {
+   "info_rating": [
+    "Very Low",
+    "Fairly Low",
+    "Average",
+    "Fairly High",
+    "Very High"
+   ]
+  },
+  "labels": {
+   "info_rating": "Interviewer rating of political information (5 ordered categories)",
+   "collegeDegree": "College degree",
+   "female": "Female",
+   "age": "Age",
+   "homeOwn": "Homeowner",
+   "govt": "Government employee",
+   "length": "Length of interview (minutes)",
+   "id": "Interviewer id"
+  }
+ },
+ {
+  "id": "wvs",
+  "title": "World Values Survey: government and poverty",
+  "kind": "real",
+  "weeks": [
+   6
+  ],
+  "source": "World Values Survey, via carData::WVS; Fox and Andersen (2006, Sociological Methodology).",
+  "description": "5,381 respondents in Australia, Norway, Sweden and the USA. Is the government doing too little, about the right amount or too much for the poor? Proportional odds is violated for some covariates.",
+  "order": {
+   "poverty": [
+    "Too Little",
+    "About Right",
+    "Too Much"
+   ]
+  },
+  "labels": {
+   "poverty": "Government action on poverty (ordered)",
+   "religion": "Member of a religion",
+   "degree": "University degree",
+   "country": "Country",
+   "age": "Age",
+   "gender": "Gender"
+  }
+ }
+]
