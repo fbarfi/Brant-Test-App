@@ -15,6 +15,7 @@ Functions
 """
 import io
 import json
+import keyword
 import math
 import os
 import re
@@ -147,9 +148,17 @@ def preview(name, n=200):
 # ---------------------------------------------------------------------------
 # model
 # ---------------------------------------------------------------------------
+# names the formula language reserves: Python keywords and the functions patsy evaluates formulas with
+_RESERVED = set(keyword.kwlist) | set(getattr(keyword, "softkwlist", [])) | {
+    "C", "Q", "I", "np", "center", "standardize", "scale", "bs", "cr", "cc", "te", "Treatment", "Sum", "Poly",
+    "Helmert", "Diff", "Intercept"}
+
+
 def _safe(name, used):
     base = re.sub(r"\W", "_", name)
     if not base or base[0].isdigit():
+        base = "v_" + base
+    if base in _RESERVED or not base.isidentifier():
         base = "v_" + base
     out, k = base, 1
     while out in used:
@@ -474,7 +483,7 @@ def python_code(spec_json):
             base = P["col_label"]["__base__" + v]
             lines.append(f'df["{v}"] = df["{v}"].astype(str).str.replace(r"\\.0$", "", regex=True)')
             lines.append(f'df["{v}"] = pd.Categorical(df["{v}"], categories=["{base}"] + sorted(set(df["{v}"]) - {{"{base}"}}))   # baseline first')
-        q = lambda v: f'Q("{v}")' if not re.match(r"^[A-Za-z_]\w*$", v) else v
+        q = lambda v: f'Q("{v}")' if (not re.match(r"^[A-Za-z_]\w*$", v) or v in _RESERVED) else v
         rhs = " + ".join(f"C({q(v)})" if v in cat else q(v) for v in xs)
         lines += [
             "",

@@ -108,6 +108,14 @@ df["y2"] = (df["y"] > 2).astype(int)
 assert json.loads(api.register("sim2", df.to_csv(index=False)))["ok"]
 r4 = json.loads(api.run(json.dumps({"dataset": "sim2", "y": "y2", "x": ["x"]})))
 check("an outcome with two categories is refused with a message", (not r4["ok"]) and "three" in r4["error"], r4.get("error", ""))
+# variable names that are Python keywords or formula functions (class, C, lambda)
+df5 = pd.DataFrame({"class": df["y"], "C": x, "lambda": df["g"]})
+assert json.loads(api.register("reserved", df5.to_csv(index=False)))["ok"]
+r5 = run({"dataset": "reserved", "y": "class", "x": ["C", "lambda"], "categorical": [], "baselines": {}})
+check("variables named class, C and lambda run", r5["ok"])
+if r5["ok"]:
+    b5 = {row["Test for"]: row for row in table(r5, "Brant test")["rows"]}
+    check("their Brant tests are labelled with the original names", "C" in b5 and "lambda" in b5, ", ".join(b5))
 code = json.loads(api.python_code(json.dumps(spec)))
 check("Python code is produced", code["ok"] and "BrantTest" in code["code"])
 
