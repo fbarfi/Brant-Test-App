@@ -138,7 +138,7 @@ def columns(name):
     return json.dumps({"ok": True, "columns": _columns(name)})
 
 
-def preview(name, n=200):
+def preview(name, n=20):
     df = DATA[name].head(int(n))
     rows = [[None if (isinstance(v, float) and math.isnan(v)) else (v.item() if hasattr(v, "item") else v)
              for v in r] for r in df.itertuples(index=False)]
