@@ -2,7 +2,8 @@
 // Brant Test app: the interface. The server (server.py) does the computing; this file builds the form,
 // the "The model" panel (equations and assumptions, typeset with the bundled MathJax) and the results.
 
-const S = { datasets: [], ds: null, cols: [], rows: 0, f: {}, busy: false };
+const S = { datasets: [], ds: null, cols: [], rows: 0, f: {}, busy: false, previewN: 20 };
+try { const v = localStorage.getItem("bta-preview-n"); if (v) S.previewN = v === "all" ? "all" : (parseInt(v, 10) || 20); } catch (e) { }
 const EXAMPLE = { dataset: "political_information", y: "info_rating",
   x: ["collegeDegree", "female", "age", "homeOwn", "govt", "length"], categorical: [], baselines: {}, cov_fallback: "auto",
   standardize: false, odds_ratios: false };
@@ -120,7 +121,12 @@ function renderData() {
     h("div", {class: "btnrow"},
       h("label", {class: "btn small", for: "upload"}, "Upload CSV…"), file,
       h("button", {class: "btn small", type: "button", onclick: showCodebook}, "Codebook"),
-      h("button", {class: "btn small", type: "button", onclick: showPreview}, "View rows")));
+      h("button", {class: "btn small", type: "button", onclick: showPreview}, "View rows"),
+      h("label", {class: "rowsn"}, "Rows to show",
+        h("select", {id: "previewn", "aria-label": "Rows to show",
+                     onchange: e => { S.previewN = e.target.value === "all" ? "all" : parseInt(e.target.value, 10);
+                                      try { localStorage.setItem("bta-preview-n", String(S.previewN)); } catch (err) { } }},
+          ...[20, 50, 200, "all"].map(v => h("option", {value: String(v), selected: String(v) === String(S.previewN)}, v === "all" ? "All" : String(v)))))));
 }
 
 function orderEditor() {
@@ -409,9 +415,9 @@ async function showCodebook() {
     outputs: [{type: "table", title: "", columns: ["Variable", "Type", "Description", "Distinct values", "Missing"], rows}]});
 }
 async function showPreview() {
-  const r = await call("/api/preview", {name: S.ds, n: 200});
+  const r = await call("/api/preview", {name: S.ds, n: S.previewN === "all" ? 0 : S.previewN});
   const rows = r.rows.map(row => Object.fromEntries(r.columns.map((c, i) => [c, row[i]])));
-  addResult({title: `First ${rows.length} rows of ${S.ds}`, spec: "", secs: "0.0", specObj: {dataset: S.ds},
+  addResult({title: rows.length >= S.rows ? `All ${rows.length} rows of ${S.ds}` : `First ${rows.length} rows of ${S.ds}`, spec: "", secs: "0.0", specObj: {dataset: S.ds},
     outputs: [{type: "table", title: "", columns: r.columns, rows}]});
 }
 

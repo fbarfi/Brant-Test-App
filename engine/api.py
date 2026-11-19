@@ -139,7 +139,9 @@ def columns(name):
 
 
 def preview(name, n=20):
-    df = DATA[name].head(int(n))
+    """The first n rows of a dataset; n = 0 (or less) returns all rows."""
+    n = int(n)
+    df = DATA[name] if n <= 0 else DATA[name].head(n)
     rows = [[None if (isinstance(v, float) and math.isnan(v)) else (v.item() if hasattr(v, "item") else v)
              for v in r] for r in df.itertuples(index=False)]
     return json.dumps({"ok": True, "columns": list(df.columns), "rows": rows})

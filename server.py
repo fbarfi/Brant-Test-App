@@ -46,7 +46,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/datasets": lambda: api.datasets(),
             "/api/load": lambda: api.load(req["name"]),
             "/api/register": lambda: api.register(req["name"], req["csv"]),
-            "/api/preview": lambda: api.preview(req["name"], req.get("n", 200)),
+            "/api/preview": lambda: api.preview(req["name"], req.get("n", 20)),
             "/api/run": lambda: api.run(json.dumps(req["spec"])),
             "/api/pycode": lambda: api.python_code(json.dumps(req["spec"])),
             "/api/csv": lambda: json.dumps({"ok": True, "csv": api.get_csv(req["name"])}),
